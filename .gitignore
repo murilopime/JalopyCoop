@@ -1,0 +1,24 @@
+﻿# Cópias do jogo e código do jogo (nunca publicar: são da MinskWorks)
+game-test/
+game-test2/
+decomp/
+
+# Coisas locais: saves, pacote do amigo, ferramentas, resultados de teste, outro projeto
+local/
+tools/
+autotest/
+coop-anything/
+*.sfminsk
+*.log
+
+# Compilação
+JalopyCoop/bin/
+JalopyCoop/obj/
+*.user
+.vs/
+
+# Scripts de teste e anotações de teste (só para uso local)
+*.bat
+TESTES-PENDENTES.md
+BUGS-CONHECIDOS.md
+NOTES.md
