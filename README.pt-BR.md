@@ -98,3 +98,4 @@ Como o mod funciona:
 
 - Jalopy é da **MinskWorks**. Este é um mod de fãs, sem ligação com eles. É preciso ter o jogo original.
 - Feito com [BepInEx](https://github.com/BepInEx/BepInEx) e [HarmonyX](https://github.com/BepInEx/HarmonyX).
+- **Luciana Tavo** - Apoio moral e beta testes.

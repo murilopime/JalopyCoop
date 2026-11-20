@@ -100,3 +100,4 @@ How the mod works:
 
 - Jalopy belongs to **MinskWorks**. This is a fan-made mod with no connection to them. You need the original game.
 - Built with [BepInEx](https://github.com/BepInEx/BepInEx) and [HarmonyX](https://github.com/BepInEx/HarmonyX).
+- **Luciana Tavo** - Moral support and beta testing.
