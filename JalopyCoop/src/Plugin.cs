@@ -16,7 +16,7 @@ namespace JalopyCoop
     {
         public const string Guid = "jalopycoop";
         public const string Name = "Jalopy Co-op";
-        public const string Version = "0.1.0";
+        public const string Version = "0.1.1";
 
         internal static ManualLogSource Log;
         /// <summary>
@@ -76,7 +76,10 @@ namespace JalopyCoop
             go.AddComponent<TrafficSync>();
             go.AddComponent<CarAmbienceFix>();
             go.AddComponent<UpgradeSync>();
-            go.AddComponent<LookJumpLog>(); // teste online: câmera pulando (só log)
+            go.AddComponent<HomeStorageSync>();
+            go.AddComponent<ReturnHomeSync>();
+            go.AddComponent<HostLeaveSync>();
+            go.AddComponent<CoopMouseTick>(); // mouse vale 1x por quadro (câmera "teleportando")
             drive.UncleDriverOffsetConfig = Config.Bind("Visual", "AjusteTioMotorista", "0,0,0",
                 "Ajuste fino (x,y,z) do tio-NPC no volante na tela do host.");
             go.AddComponent<CarControlsSync>();
@@ -114,7 +117,12 @@ namespace JalopyCoop
                     int tv;
                     if (int.TryParse(arg.Substring("-coop-traffic=".Length), out tv) && tv >= 0 && tv <= 4) TrafficOverride = tv;
                 }
-                else if (arg == "-coop-mute") go.AddComponent<MuteAudio>();
+                else if (arg.StartsWith("-coop-lag="))
+                {
+                    int lag;
+                    if (int.TryParse(arg.Substring("-coop-lag=".Length), out lag) && lag > 0 && lag <= 1000) { CoopNet.LagMs = lag; Log.LogInfo("Teste: ping simulado de " + lag + " ms."); }
+                }
+                else if (arg == "-coop-mute")go.AddComponent<MuteAudio>();
                 else if (arg.StartsWith("-coop-autotest=")) go.AddComponent<AutoTest>().Scenario = arg.Substring("-coop-autotest=".Length);
                 else if (arg == "-coop-host") net.StartHost(port.Value);
                 else if (arg.StartsWith("-coop-join="))

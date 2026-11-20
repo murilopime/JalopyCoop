@@ -133,16 +133,7 @@ namespace JalopyCoop.Sync
             try
             {
                 byte[] data;
-                if (ES3.loadedSave != null)
-                {
-                    var ms = new MemoryStream();
-                    // -coop-traffic: o tio usa o aiCount do save do host; manda o valor que o host usa (só na cópia enviada)
-                    int keepAi = ES3.loadedSave.aiCount;
-                    if (Plugin.TrafficOverride >= 0) ES3.loadedSave.aiCount = Plugin.TrafficOverride;
-                    try { new BinaryFormatter().Serialize(ms, ES3.loadedSave); }
-                    finally { ES3.loadedSave.aiCount = keepAi; }
-                    data = ms.ToArray();
-                }
+                if (ES3.loadedSave != null) data = MemorySaveBytes();
                 else
                 {
                     var path = Application.persistentDataPath + "/Saves/Save.sfminsk";
@@ -159,6 +150,35 @@ namespace JalopyCoop.Sync
             catch (Exception e) { Plugin.Log.LogError("Save: falha ao mandar: " + e); }
         }
 
+        /// <summary>Host: o save da memória em bytes (com o trânsito do -coop-traffic, só na cópia).</summary>
+        internal static byte[] MemorySaveBytes()
+        {
+            var ms = new MemoryStream();
+            // -coop-traffic: o tio usa o aiCount do save do host; manda o valor que o host usa (só na cópia enviada)
+            int keepAi = ES3.loadedSave.aiCount;
+            if (Plugin.TrafficOverride >= 0) ES3.loadedSave.aiCount = Plugin.TrafficOverride;
+            try { new BinaryFormatter().Serialize(ms, ES3.loadedSave); }
+            finally { ES3.loadedSave.aiCount = keepAi; }
+            return ms.ToArray();
+        }
+
+        /// <summary>Tio: troca o save da memória pelo do host, mantendo as configurações deste jogador.</summary>
+        internal static void UseHostSave(byte[] data)
+        {
+            SaveFile host;
+            using (var ms = new MemoryStream(data)) host = (SaveFile)new BinaryFormatter().Deserialize(ms);
+            var mine = ES3.loadedSave;
+            if (mine != null)
+            {
+                foreach (var name in KeepLocal)
+                {
+                    var f = typeof(SaveFile).GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    if (f != null) f.SetValue(host, f.GetValue(mine));
+                }
+            }
+            ES3.loadedSave = host; // só memória: o tio nunca grava o arquivo no co-op
+        }
+
         // ================= tio =================
 
         private static readonly string[] KeepLocal = { "fov", "masterVolume", "effectsVolume", "musicVolume", "mouseSensitivity", "assignedInputStrings" };
@@ -172,19 +192,7 @@ namespace JalopyCoop.Sync
             if (GameRefs.InGame) { Plugin.Log.LogWarning("Save: chegou com o jogo já carregado; para entrar no mundo do host, volte ao menu."); inGameHintUntil = Time.realtimeSinceStartup + 10f; return; }
             try
             {
-                SaveFile host;
-                using (var ms = new MemoryStream(data)) host = (SaveFile)new BinaryFormatter().Deserialize(ms);
-                var mine = ES3.loadedSave;
-                if (mine != null)
-                {
-                    // as configurações são do jogador, não do mundo
-                    foreach (var name in KeepLocal)
-                    {
-                        var f = typeof(SaveFile).GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if (f != null) f.SetValue(host, f.GetValue(mine));
-                    }
-                }
-                ES3.loadedSave = host; // só memória: o tio nunca grava o arquivo no co-op
+                UseHostSave(data); // as configurações são do jogador, não do mundo
                 HaveHostSave = true;
                 Plugin.Log.LogInfo("Save: usando o save do host (" + len + " bytes, #" + SeededRandom.Hash(Convert.ToBase64String(data)).ToString("X8") + "). O save deste PC não foi mexido.");
                 // Entra sozinho no mundo do host: o tio só clicou Conectar no menu (ou já tinha clicado Continuar)

@@ -22,7 +22,7 @@ namespace JalopyCoop.Net
     /// </summary>
     public class CoopNet : MonoBehaviour
     {
-        public const int ProtocolVersion = 36;
+        public const int ProtocolVersion = 40;
         private const float SendInterval = 0.05f;   // 20 pacotes por segundo
         private const float TimeoutSeconds = 10f;
         private const float ConnectTimeoutSeconds = 8f;
@@ -165,6 +165,8 @@ namespace JalopyCoop.Net
         {
             if (tcp != null) { try { tcp.Close(); } catch { } tcp = null; }
             tcpBuffer.Clear();
+            lagTcp.Clear();
+            lagUdp.Clear();
         }
 
         private static UdpClient MakeUdp(int port)
@@ -200,6 +202,8 @@ namespace JalopyCoop.Net
 
                 ReadTcp();
                 ReadUdp();
+                FlushLag();
+                if (Mode == CoopMode.Off) return;
 
                 if (Connected && Time.realtimeSinceStartup - lastHeard > TimeoutSeconds)
                 {
@@ -292,7 +296,34 @@ namespace JalopyCoop.Net
                 var payload = tcpBuffer.GetRange(4, len).ToArray();
                 tcpBuffer.RemoveRange(0, 4 + len);
                 lastHeard = Time.realtimeSinceStartup;
+                if (LagMs > 0) lagTcp.Enqueue(new KeyValuePair<float, byte[]>(Time.realtimeSinceStartup + LagMs / 2000f, payload));
+                else HandleTcp(new BinaryReader(new MemoryStream(payload)));
+            }
+        }
+
+        // ================= atraso simulado (só para teste local: -coop-lag=ms) =================
+        // Cada lado segura o que chega por metade do ping pedido: ping total ~ LagMs, como no online.
+        // TCP sai na mesma ordem; UDP tem uma variação pequena (pode chegar fora de ordem, como na internet).
+
+        /// <summary>Ping simulado em ms (0 = desligado). Só pela linha de comando de teste.</summary>
+        public static int LagMs;
+        private readonly Queue<KeyValuePair<float, byte[]>> lagTcp = new Queue<KeyValuePair<float, byte[]>>();
+        private readonly List<LagPacket> lagUdp = new List<LagPacket>();
+        private struct LagPacket { public float due; public byte[] data; public IPEndPoint from; }
+
+        private void FlushLag()
+        {
+            if (LagMs <= 0) return;
+            float now = Time.realtimeSinceStartup;
+            while (lagTcp.Count > 0 && lagTcp.Peek().Key <= now && Mode != CoopMode.Off)
+            {
+                var payload = lagTcp.Dequeue().Value;
                 HandleTcp(new BinaryReader(new MemoryStream(payload)));
+            }
+            for (int i = 0; i < lagUdp.Count && Mode != CoopMode.Off; )
+            {
+                if (lagUdp[i].due <= now) { var pk = lagUdp[i]; lagUdp.RemoveAt(i); HandleUdp(pk.data, pk.from); }
+                else i++;
             }
         }
 
@@ -356,6 +387,17 @@ namespace JalopyCoop.Net
             catch (Exception e) { Plugin.Log.LogWarning("Falha ao enviar " + type + ": " + e.Message); }
         }
 
+        /// <summary>
+        /// A cena recarregou com os dois conectados (voltar para casa): avisa as sincronias como numa reconexão
+        /// (false antes de recarregar, true depois), sem fechar a conexão.
+        /// </summary>
+        public void SessionReset(bool connected)
+        {
+            if (!Connected || OnConnectionChanged == null) return;
+            try { OnConnectionChanged(connected); }
+            catch (Exception e) { Plugin.Log.LogError("SessionReset: " + e); }
+        }
+
         private void SetConnected(string status)
         {
             Connected = true;
@@ -391,16 +433,30 @@ namespace JalopyCoop.Net
                 catch (SocketException) { break; }
                 if (remoteIp == null || !from.Address.Equals(remoteIp)) continue; // pacote de outro lugar
                 if (data.Length < 5) continue;
+                if (LagMs > 0)
+                {
+                    float d = LagMs / 2000f * UnityEngine.Random.Range(0.85f, 1.15f);
+                    lagUdp.Add(new LagPacket { due = Time.realtimeSinceStartup + d, data = data, from = from });
+                    lastHeard = Time.realtimeSinceStartup;
+                    continue;
+                }
+                HandleUdp(data, from);
+            }
+        }
+
+        private void HandleUdp(byte[] data, IPEndPoint from)
+        {
+            {
 
                 var r = new BinaryReader(new MemoryStream(data));
                 var type = (Msg)r.ReadByte();
                 uint seq = r.ReadUInt32();
                 uint last;
-                if (lastSeqIn.TryGetValue((byte)type, out last) && seq <= last) continue; // velho/duplicado
+                if (lastSeqIn.TryGetValue((byte)type, out last) && seq <= last) return; // velho/duplicado
                 lastSeqIn[(byte)type] = seq;
                 lastHeard = Time.realtimeSinceStartup;
                 if (Mode == CoopMode.Host && Connected) remoteUdp = from; // segue a porta real (NAT/VPN)
-                if (!Connected) continue;
+                if (!Connected) return;
 
                 try
                 {
@@ -458,7 +514,12 @@ namespace JalopyCoop.Net
         }
 
         private void OnDestroy() { Stop(); }
-        private void OnApplicationQuit() { Stop(); }
+        private void OnApplicationQuit()
+        {
+            // Host fechando o jogo: avisa o tio antes de fechar (se não chegar, a conexão caindo resolve igual)
+            if (Mode == CoopMode.Host && Connected) { try { SendReliable(Msg.HostLeft); } catch { } }
+            Stop();
+        }
 
         public static string LocalIps()
         {

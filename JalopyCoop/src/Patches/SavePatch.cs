@@ -13,8 +13,11 @@ namespace JalopyCoop.Patches
         private static bool Prefix(int state)
         {
             var net = CoopNet.Instance;
-            if (net != null && net.Mode == CoopMode.Client)
+            bool client = net != null && net.Mode == CoopMode.Client;
+            if (client || JalopyCoop.Sync.HostLeaveSync.InHostWorld) // InHostWorld: ainda no mundo do host, mesmo desconectado
             {
+                if (client && state == 3) JalopyCoop.Sync.ReturnHomeSync.ClientAsked(); // "voltar para casa" do tio: o host leva os dois
+                if (state == 2) JalopyCoop.Sync.HostLeaveSync.ClientQuit();           // "salvar e sair" do tio: só sai para o menu
                 Plugin.Log.LogInfo("Save bloqueado no cliente (estado " + state + "). Só o host salva.");
                 return false;
             }
@@ -36,6 +39,7 @@ namespace JalopyCoop.Patches
         {
             var net = JalopyCoop.Net.CoopNet.Instance;
             bool client = net != null && net.Mode == JalopyCoop.Net.CoopMode.Client;
+            if (JalopyCoop.Sync.HostLeaveSync.InHostWorld) client = true; // saindo do mundo do host: o save é a cópia do host
             foreach (var a in System.Environment.GetCommandLineArgs()) if (a.StartsWith("-coop-join=")) client = true;
             if (!client) return true;
             Plugin.Log.LogInfo("Gravar arquivo de save bloqueado no tio.");

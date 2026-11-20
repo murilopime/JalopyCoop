@@ -81,7 +81,11 @@ namespace JalopyCoop.Net
         TrafficGone = 68,  // host -> tio: carro do trânsito sumiu
         UpgradeFitted = 69, // os 2 lados: instalei um upgrade no carro (id do ExtraComponentC, peso)
         UpgradeAsk = 70,    // tio -> host: me manda os upgrades instalados (ao entrar no jogo)
-        UpgradeState = 71   // host -> tio: upgrades instalados (bagageiro, para-choque, para-lamas, painel, faróis, ferramentas+nível)
+        UpgradeState = 71,  // host -> tio: upgrades instalados (bagageiro, para-choque, para-lamas, painel, faróis, ferramentas+nível)
+        HomeStorage = 72,   // os 2 lados: comprei prateleira(s) do depósito em casa (total de prateleiras agora)
+        ReturnHome = 73,    // host -> tio: voltei para casa (save novo do host); o tio recarrega junto
+        ReturnHomeAsk = 74, // tio -> host: o tio escolheu "voltar para casa" no menu
+        HostLeft = 75       // host -> tio: saí do mundo (salvar e sair para o menu, ou fechei o jogo)
     }
 
     /// <summary>Teclas de direção do jogador-tio (índices de MainMenuC.assignedInputStrings).</summary>

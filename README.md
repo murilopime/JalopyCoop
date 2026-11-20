@@ -66,17 +66,7 @@ After the game runs once, the file `BepInEx/config/jalopycoop.cfg` is created. I
 
 ## Known issues
 
-- The rain sound outside the car may not play.
-- The position of the uncle NPC at the wheel, on the host's screen, still needs adjusting.
-- Not synced yet:
-  - the petrol pump counter;
-  - the water lid;
-  - the cigarette lighter;
-  - the sun visor;
-  - the alarm clock;
-  - the motel's curtains, oven and drawers;
-  - the home storage.
-- Not yet tested in co-op: the countries after the first one, the trip back home and the end of the game.
+- Not yet tested in co-op: the countries after the first one and the end of the game.
 
 Found a bug? Open an **[Issue](../../issues)** and attach `BepInEx/LogOutput.log` **from both players**. This file is in the Jalopy folder.
 

@@ -64,17 +64,7 @@ Depois da primeira vez que o jogo abre, o arquivo `BepInEx/config/jalopycoop.cfg
 
 ## Problemas conhecidos
 
-- O som da chuva fora do carro pode não tocar.
-- A posição do tio-NPC no volante, na tela do host, ainda precisa de ajuste.
-- Ainda não sincronizam:
-  - o contador da bomba do posto;
-  - a tampa da água;
-  - o acendedor de cigarro;
-  - o quebra-sol;
-  - o despertador;
-  - as cortinas, o forno e as gavetas do motel;
-  - o depósito em casa.
-- Ainda não foi testado no co-op: os países depois do primeiro, a volta para casa e o final do jogo.
+- Ainda não foi testado no co-op: os países depois do primeiro e o final do jogo.
 
 Achou um bug? Abra uma **[Issue](../../issues)** e anexe o `BepInEx/LogOutput.log` **dos dois jogadores**. Esse arquivo fica na pasta do Jalopy.
 

@@ -90,7 +90,7 @@ namespace JalopyCoop.Sync
                     net.SendReliable(Msg.ItemHello, w => { });
                 }
             }
-            if (net.Mode == CoopMode.Host && hostPendingManifest)
+            if (net.Mode == CoopMode.Host && hostPendingManifest && inGameFor > 4f) // cena recém-carregada: espera o save montar o carro
             {
                 hostPendingManifest = false;
                 SendManifest();
@@ -498,7 +498,27 @@ namespace JalopyCoop.Sync
                 if (op.inventoryPlacedAt != null)
                 {
                     if (rel.t < 0.5f) continue; // espera a animação de guardar
-                    Send(Msg.ItemStore, op, w => WriteCarPose(w, op.transform));
+                    byte where; string slotPath;
+                    if (SlotOf(op, out where, out slotPath))
+                    {
+                        // Manda QUAL espaço: o outro lado guarda no mesmo e marca como ocupado (antes os itens podiam
+                        // ficar um dentro do outro: o outro jogo achava o espaço livre).
+                        var lp = op.transform.localPosition; var lr = op.transform.localRotation;
+                        Send(Msg.ItemStore, op, w => { WriteCarPose(w, op.transform); w.Write(where); w.Write(slotPath); NetIO.Put(w, lp); NetIO.Put(w, lr); });
+                        Plugin.Log.LogInfo("Itens: eu guardei " + op.name + " (" + op.inventoryPlacedAt.name + (where == StoreHome ? ", depósito de casa" : "") + ")");
+                        done.Add(op);
+                        continue;
+                    }
+                    if (InHomeStorage(op))
+                    {
+                        // Prateleira do depósito em casa: não é o porta-malas, então vai solto no lugar (sem ficar preso ao carro).
+                        int hlayer = op.gameObject.layer;
+                        Send(Msg.ItemFree, op, w => { WritePose(w, op.transform); w.Write(false); w.Write(hlayer); });
+                        Plugin.Log.LogInfo("Itens: eu guardei " + op.name + " no depósito de casa");
+                        done.Add(op);
+                        continue;
+                    }
+                    Send(Msg.ItemStore, op, w => { WriteCarPose(w, op.transform); w.Write(StoreNone); w.Write(""); NetIO.Put(w, Vector3.zero); NetIO.Put(w, Quaternion.identity); });
                     Plugin.Log.LogInfo("Itens: eu guardei " + op.name + " (" + op.inventoryPlacedAt.name + ")");
                     done.Add(op);
                     continue;
@@ -520,6 +540,145 @@ namespace JalopyCoop.Sync
                 }
             }
             foreach (var op in done) released.Remove(op);
+        }
+
+        private const byte StoreNone = 0, StoreCar = 1, StoreHome = 2;
+
+        /// <summary>Espaço (InventoryRelayC) onde o item está guardado: no carro ou numa prateleira do depósito de casa.</summary>
+        private static bool SlotOf(ObjectPickupC op, out byte where, out string path)
+        {
+            where = StoreNone; path = "";
+            var slot = op.inventoryPlacedAt;
+            if (slot == null || op.transform.parent != slot || slot.GetComponent<InventoryRelayC>() == null) return false;
+            if (InHomeStorage(op))
+            {
+                var hs = HomeStorageClipboardC.Global;
+                if (hs == null) return false;
+                for (int i = 0; i < hs.storageInventory.Count; i++)
+                {
+                    var shelf = hs.storageInventory[i];
+                    if (shelf == null || !slot.IsChildOf(shelf.transform)) continue;
+                    where = StoreHome; path = i + ":" + PathFrom(shelf.transform, slot);
+                    return true;
+                }
+                return false;
+            }
+            var car = Car;
+            if (car == null || !slot.IsChildOf(car)) return false;
+            where = StoreCar; path = PathFrom(car, slot);
+            return true;
+        }
+
+        /// <summary>Caminho nome#n/nome#n (n = qual dos irmãos com o mesmo nome), igual nos dois jogos.</summary>
+        private static string PathFrom(Transform root, Transform t)
+        {
+            var parts = new List<string>();
+            while (t != null && t != root)
+            {
+                var parent = t.parent;
+                int n = 0;
+                if (parent != null)
+                    for (int i = 0; i < parent.childCount; i++)
+                    {
+                        var c = parent.GetChild(i);
+                        if (c == t) break;
+                        if (c.name == t.name) n++;
+                    }
+                parts.Insert(0, t.name + "#" + n);
+                t = parent;
+            }
+            return string.Join("/", parts.ToArray());
+        }
+
+        private static Transform FollowPath(Transform root, string path)
+        {
+            var t = root;
+            if (string.IsNullOrEmpty(path)) return null;
+            foreach (var part in path.Split('/'))
+            {
+                int hash = part.LastIndexOf('#');
+                if (hash < 0) return null;
+                string name = part.Substring(0, hash);
+                int want;
+                if (!int.TryParse(part.Substring(hash + 1), out want)) return null;
+                Transform found = null;
+                int n = 0;
+                for (int i = 0; i < t.childCount; i++)
+                {
+                    var c = t.GetChild(i);
+                    if (c.name != name) continue;
+                    if (n == want) { found = c; break; }
+                    n++;
+                }
+                if (found == null) return null;
+                t = found;
+            }
+            return t;
+        }
+
+        private static Transform ResolveSlot(byte where, string path)
+        {
+            if (where == StoreCar) { var car = Car; return car != null ? FollowPath(car, path) : null; }
+            if (where == StoreHome)
+            {
+                var hs = HomeStorageClipboardC.Global;
+                int colon = path.IndexOf(':');
+                int idx;
+                if (hs == null || colon < 0 || !int.TryParse(path.Substring(0, colon), out idx) || idx < 0 || idx >= hs.storageInventory.Count) return null;
+                var shelf = hs.storageInventory[idx];
+                return shelf != null ? FollowPath(shelf.transform, path.Substring(colon + 1)) : null;
+            }
+            return null;
+        }
+
+        private static readonly System.Reflection.MethodInfo ModifyWeight =
+            HarmonyLib.AccessTools.Method(typeof(InventoryLogicC), "ModifyWeight");
+
+        /// <summary>Guarda como o jogo: no espaço, marcado como ocupado, peso no carro, contagem de espaços.</summary>
+        private static bool PlaceInSlot(ObjectPickupC op, Transform slot, Vector3 lp, Quaternion lr)
+        {
+            var relay = slot.GetComponent<InventoryRelayC>();
+            if (relay == null) return false;
+            if (relay.isOccupied) Plugin.Log.LogWarning("Itens: o espaço " + slot.name + " já estava ocupado aqui (guardando " + op.name + " mesmo assim).");
+            op.transform.parent = slot;
+            op.transform.localPosition = lp;
+            op.transform.localRotation = lr;
+            var rb = op.GetComponent<Rigidbody>();
+            if (rb != null) rb.isKinematic = true;
+            int def = LayerMask.NameToLayer("Default");
+            foreach (var t in op.GetComponentsInChildren<Transform>(true)) t.gameObject.layer = def;
+            foreach (var c in op.GetComponents<Collider>()) { c.isTrigger = true; c.enabled = true; }
+            op.inventoryPlacedAt = slot;
+            if (Array.IndexOf(MultiSlots, relay.name) >= 0) { try { relay.Occupy(); } catch { } }
+            else
+            {
+                relay.isOccupied = true;
+                if (op.dimensionY == 2 && op.dimensionX == 1 && op.dimensionZ == 1 && relay.spaceAbove != null)
+                {
+                    var above = relay.spaceAbove.GetComponent<InventoryRelayC>();
+                    if (above != null) above.isOccupied = true;
+                }
+            }
+            var inv = relay.inventoryBase != null ? relay.inventoryBase.GetComponent<InventoryLogicC>() : null;
+            if (inv != null)
+            {
+                try
+                {
+                    if (ModifyWeight != null) ModifyWeight.Invoke(inv, new object[] { op.transform }); // só soma no porta-malas (o jogo confere)
+                    inv.AvailableSlotCount();
+                    inv.UpdateInventory();
+                }
+                catch (Exception e) { Plugin.Log.LogWarning("Itens: guardar aqui: " + e.Message); }
+            }
+            return true;
+        }
+
+        private static bool InHomeStorage(ObjectPickupC op)
+        {
+            var relay = op.inventoryPlacedAt != null ? op.inventoryPlacedAt.GetComponent<InventoryRelayC>() : null;
+            var inv = relay != null && relay.inventoryBase != null ? relay.inventoryBase.GetComponent<InventoryLogicC>() : null;
+            if (inv == null) inv = op.inventoryPlacedAt != null ? op.inventoryPlacedAt.GetComponentInParent<InventoryLogicC>() : null;
+            return inv != null && inv.isHomeInventory;
         }
 
         private void AddHeld(HashSet<ObjectPickupC> set, GameObject go)
@@ -724,8 +883,19 @@ namespace JalopyCoop.Sync
         {
             var pos = NetIO.GetVector3(r);
             var rot = NetIO.GetQuaternion(r);
+            byte where = r.ReadByte();
+            string slotPath = r.ReadString();
+            var lp = NetIO.GetVector3(r);
+            var lr = NetIO.GetQuaternion(r);
             RemoteItem ri;
             if (remote.TryGetValue(op, out ri)) { RestoreColliders(ri); remote.Remove(op); }
+            var slot = ResolveSlot(where, slotPath);
+            if (slot != null && PlaceInSlot(op, slot, lp, lr))
+            {
+                Plugin.Log.LogInfo("Itens: o outro jogador guardou " + op.name + " em " + slot.name + (where == StoreHome ? " (depósito de casa)" : " (porta-malas)"));
+                return;
+            }
+            if (where != StoreNone) Plugin.Log.LogWarning("Itens: espaço " + slotPath + " não achado aqui; " + op.name + " fica só no lugar.");
             var car = Car;
             if (car == null) return;
             op.transform.parent = car;

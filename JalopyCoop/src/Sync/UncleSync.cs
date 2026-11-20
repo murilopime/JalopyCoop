@@ -451,12 +451,47 @@ namespace JalopyCoop.Sync
             var anim = logic.GetComponent<Animator>();
             if (anim != null) anim.SetFloat("walkSpeed", 0f);
             logic.CarDoorOpen();
-            logic.StartCoroutine(logic.UncleEnterCar());
+            EnterCarNoDoor(logic, anim);
             yield return null;
             FastForward(anim);
+            if (logic != null) logic.CarDoorClosed(); // o que o jogo faz quando a porta fecha (sem mexer na porta)
             Plugin.Log.LogInfo("Tio-NPC sentou, animação: " + ClipNames(anim));
             yield return new WaitForSeconds(5f);
             if (logic != null) Plugin.Log.LogInfo("Tio-NPC no carro: isSat=" + logic.isSat + " pai=" + (logic.transform.parent != null ? logic.transform.parent.name : "-"));
+        }
+
+        /// <summary>
+        /// O mesmo que UncleLogicC.UncleEnterCar, SEM mexer na porta do passageiro: a rotina do jogo abre a porta,
+        /// espera 4 s e fecha (a animação de entrar). No co-op o jogador-tio já entrou pela porta dele, então a porta
+        /// abria sozinha depois e ia para o outro lado pela sincronia de portas (teste de 2026-11-20).
+        /// A maleta vai para o carro pelo próprio mod ("Maleta do tio guardada").
+        /// </summary>
+        private static void EnterCarNoDoor(UncleLogicC logic, Animator anim)
+        {
+            logic.readyToBoard = false;
+            try
+            {
+                var relay = logic.suitcase != null ? logic.suitcase.GetComponent<SuitcaseRelayC>() : null;
+                var lk = relay != null && relay._lock != null ? relay._lock.GetComponent<OpenBriefcaseLogicC>() : null;
+                if (lk != null) lk.StartCoroutine("CloseBreifcase");
+            }
+            catch { }
+            if (logic.sleepParticle != null)
+            {
+                var ps = logic.sleepParticle.GetComponent("ParticleSystem");
+                if (ps != null) { try { HarmonyLib.Traverse.Create(ps).Method("Stop").GetValue(); } catch { } }
+            }
+            var cl = logic.carLogic != null ? logic.carLogic.GetComponent<CarLogicC>() : null;
+            if (cl != null) cl.preventHandBrake = false;
+            var ai = logic.GetComponent("AIPath");
+            if (ai != null) { var tr = HarmonyLib.Traverse.Create(ai); tr.Field("target").SetValue(null); tr.Field("canMove").SetValue(false); }
+            var cc = logic.GetComponent<CharacterController>();
+            if (cc != null) cc.enabled = false;
+            logic.transform.parent = logic.uncleCarTransform;
+            logic.transform.localEulerAngles = Vector3.zero;
+            logic.transform.localPosition = Vector3.zero;
+            if (anim != null) { anim.SetBool("enterCar", true); anim.SetBool("exitCar", false); }
+            logic.isSat = true;
         }
 
         // ---------- host: tio-NPC a pé seguindo o jogador-tio (MVP 3) ----------
