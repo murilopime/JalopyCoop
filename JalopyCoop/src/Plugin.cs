@@ -16,7 +16,7 @@ namespace JalopyCoop
     {
         public const string Guid = "jalopycoop";
         public const string Name = "Jalopy Co-op";
-        public const string Version = "0.1.1";
+        public const string Version = "0.1.2";
 
         internal static ManualLogSource Log;
         /// <summary>
