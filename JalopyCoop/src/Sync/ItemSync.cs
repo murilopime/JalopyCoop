@@ -297,13 +297,78 @@ namespace JalopyCoop.Sync
             var hostDrops = ReadEntries(r);
             ClearIds();
             foreach (var e in hostItems) entries[e.id] = e;
-            int okItems = Match(hostItems, SceneObjects<ObjectPickupC>(), items, itemIds);
+            int okItems = Match(hostItems, SceneObjects<ObjectPickupC>(), items, itemIds, true);
             int okDrops = Match(hostDrops, SceneObjects<HoldingLogicC>(), drops, dropIds);
             ready = true;
             Plugin.Log.LogInfo("Itens: casados " + okItems + "/" + hostItems.Count + " itens e " + okDrops + "/" + hostDrops.Count + " encaixes.");
+            AskDifferent(hostItems);
         }
 
-        private static int Match<T>(List<Entry> host, List<T> local, Dictionary<int, T> byId, Dictionary<T, int> idOf) where T : Component
+        /// <summary>
+        /// TIO, logo depois de casar: o save que o tio carregou é o do último salvamento do host. Item que o host mexeu
+        /// depois disso está em outro lugar aqui; pede ao host como ele está agora (o host manda pegar + soltar/encaixar/
+        /// guardar, as mensagens de sempre).
+        /// </summary>
+        private void AskDifferent(List<Entry> hostItems)
+        {
+            var ids = new List<int>();
+            foreach (var e in hostItems)
+            {
+                ObjectPickupC op;
+                if (!items.TryGetValue(e.id, out op) || op == null) continue;
+                bool carSpace; Vector3 pos;
+                KeyPos(op.transform, out carSpace, out pos);
+                if (carSpace != e.carSpace || (pos - e.pos).magnitude > 0.2f) ids.Add(e.id);
+            }
+            if (ids.Count == 0) return;
+            CoopNet.Instance.SendReliable(Msg.ItemStateAsk, w => { w.Write(ids.Count); foreach (var id in ids) w.Write(id); });
+            Plugin.Log.LogInfo("Itens: " + ids.Count + " item(ns) em lugar diferente do host (mexidos depois do save); pedi como estão.");
+        }
+
+        /// <summary>HOST: o tio pediu o estado destes itens. Manda "peguei" + onde o item está agora.</summary>
+        private void SendStates(BinaryReader r)
+        {
+            int n = r.ReadInt32();
+            int sent = 0;
+            for (int i = 0; i < n; i++)
+            {
+                var op = GetItem(r.ReadInt32());
+                if (op == null || heldLocal.Contains(op) || released.ContainsKey(op)) continue; // na mão: vai quando soltar
+                Send(Msg.ItemHold, op, w => { });
+                SendSettled(op);
+                sent++;
+            }
+            Plugin.Log.LogInfo("Itens: mandei ao tio como estão " + sent + " item(ns) mexidos depois do save.");
+        }
+
+        /// <summary>Onde o item está parado agora: encaixado, guardado ou solto (as mensagens de quando se solta um item).</summary>
+        private void SendSettled(ObjectPickupC op)
+        {
+            var parent = op.transform.parent;
+            var hl = parent != null ? parent.GetComponent<HoldingLogicC>() : null;
+            int dropId;
+            if (hl != null && dropIds.TryGetValue(hl, out dropId)) { Send(Msg.ItemPlace, op, w => w.Write(dropId)); return; }
+            if (op.inventoryPlacedAt != null)
+            {
+                byte where; string slotPath;
+                if (SlotOf(op, out where, out slotPath))
+                {
+                    var lp = op.transform.localPosition; var lr = op.transform.localRotation;
+                    Send(Msg.ItemStore, op, w => { WriteCarPose(w, op.transform); w.Write(where); w.Write(slotPath); NetIO.Put(w, lp); NetIO.Put(w, lr); });
+                    return;
+                }
+                if (!InHomeStorage(op) && Car != null)
+                {
+                    Send(Msg.ItemStore, op, w => { WriteCarPose(w, op.transform); w.Write(StoreNone); w.Write(""); NetIO.Put(w, Vector3.zero); NetIO.Put(w, Quaternion.identity); });
+                    return;
+                }
+            }
+            bool inCar = RestsOnCar(op.transform);
+            int layer = op.gameObject.layer;
+            Send(Msg.ItemFree, op, w => { WritePose(w, op.transform); w.Write(inCar); w.Write(layer); });
+        }
+
+        private static int Match<T>(List<Entry> host, List<T> local, Dictionary<int, T> byId, Dictionary<T, int> idOf, bool farPass = false) where T : Component
         {
             var byName = new Dictionary<string, List<T>>();
             foreach (var o in local)
@@ -314,6 +379,7 @@ namespace JalopyCoop.Sync
             }
             var used = new HashSet<T>();
             var missing = new List<string>();
+            var leftover = new List<Entry>();
             int ok = 0;
             foreach (var e in host)
             {
@@ -332,12 +398,38 @@ namespace JalopyCoop.Sync
                         if (d < bestD) { bestD = d; best = c; }
                     }
                 }
-                if (best == null) { if (missing.Count < 12) missing.Add(e.name); continue; }
+                if (best == null) { leftover.Add(e); continue; }
                 used.Add(best);
                 byId[e.id] = best;
                 idOf[best] = e.id;
                 ok++;
             }
+            // 2ª volta (itens): o host mexeu no item depois do save e ele ficou longe daqui. Casa pelo nome com o que
+            // sobrou do mesmo nome (o mais perto); a posição certa vem depois (AskDifferent).
+            int far = 0;
+            foreach (var e in leftover)
+            {
+                T best = null;
+                List<T> cands;
+                if (farPass && byName.TryGetValue(e.name, out cands))
+                {
+                    float bestD = float.MaxValue;
+                    foreach (var c in cands)
+                    {
+                        if (used.Contains(c)) continue;
+                        bool carSpace; Vector3 pos;
+                        KeyPos(c.transform, out carSpace, out pos);
+                        float d = carSpace == e.carSpace ? (pos - e.pos).magnitude : 1000f;
+                        if (d < bestD) { bestD = d; best = c; }
+                    }
+                }
+                if (best == null) { if (missing.Count < 12) missing.Add(e.name); continue; }
+                used.Add(best);
+                byId[e.id] = best;
+                idOf[best] = e.id;
+                ok++; far++;
+            }
+            if (far > 0) Plugin.Log.LogInfo("  casados longe (" + typeof(T).Name + "): " + far + " (mexidos depois do save)");
             if (missing.Count > 0) Plugin.Log.LogInfo("  sem par (" + typeof(T).Name + "): " + string.Join(", ", missing.ToArray()));
             return ok;
         }
@@ -758,6 +850,9 @@ namespace JalopyCoop.Sync
                         return;
                     case Msg.ItemAdd:
                         if (CoopNet.Instance.Mode == CoopMode.Client && ready) ReceiveNewItems(r);
+                        return;
+                    case Msg.ItemStateAsk:
+                        if (CoopNet.Instance.Mode == CoopMode.Host && ready) SendStates(r);
                         return;
                     case Msg.ItemHold:
                     case Msg.ItemPlace:

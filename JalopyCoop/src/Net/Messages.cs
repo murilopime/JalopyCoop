@@ -85,7 +85,8 @@ namespace JalopyCoop.Net
         HomeStorage = 72,   // os 2 lados: comprei prateleira(s) do depósito em casa (total de prateleiras agora)
         ReturnHome = 73,    // host -> tio: voltei para casa (save novo do host); o tio recarrega junto
         ReturnHomeAsk = 74, // tio -> host: o tio escolheu "voltar para casa" no menu
-        HostLeft = 75       // host -> tio: saí do mundo (salvar e sair para o menu, ou fechei o jogo)
+        HostLeft = 75,      // host -> tio: saí do mundo (salvar e sair para o menu, ou fechei o jogo)
+        ItemStateAsk = 76   // tio -> host: estes itens estão diferentes aqui (o host mexeu depois do save); manda como estão
     }
 
     /// <summary>Teclas de direção do jogador-tio (índices de MainMenuC.assignedInputStrings).</summary>

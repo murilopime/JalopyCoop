@@ -22,7 +22,7 @@ namespace JalopyCoop.Net
     /// </summary>
     public class CoopNet : MonoBehaviour
     {
-        public const int ProtocolVersion = 40;
+        public const int ProtocolVersion = 41;
         private const float SendInterval = 0.05f;   // 20 pacotes por segundo
         private const float TimeoutSeconds = 10f;
         private const float ConnectTimeoutSeconds = 8f;
